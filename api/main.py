@@ -1,0 +1,17 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from api.routes import health, ingest, query
+
+app = FastAPI(title="Multi-Agent Research Assistant", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(ingest.router, prefix="/api", tags=["ingestion"])
+app.include_router(query.router, prefix="/api", tags=["query"])

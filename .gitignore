@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+data/faiss_index/
+data/*.pkl
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.DS_Store
