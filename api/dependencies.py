@@ -38,14 +38,20 @@ def get_document_processor() -> DocumentProcessor:
     return _document_processor
 
 
-def get_llm_provider() -> FallbackLLMProvider:
-    claude = ClaudeProvider(api_key=settings.anthropic_api_key, model=settings.claude_model)
-    gemini = GeminiProvider(api_key=settings.google_api_key, model=settings.gemini_model)
+_llm_provider: FallbackLLMProvider | None = None
 
-    providers = {"claude": claude, "gemini": gemini}
-    primary = providers.get(settings.llm_primary, gemini)
-    fallback = providers.get(settings.llm_fallback, claude)
-    return FallbackLLMProvider(primary=primary, fallback=fallback)
+
+def get_llm_provider() -> FallbackLLMProvider:
+    global _llm_provider
+    if _llm_provider is None:
+        claude = ClaudeProvider(api_key=settings.anthropic_api_key, model=settings.claude_model)
+        gemini = GeminiProvider(api_key=settings.google_api_key, model=settings.gemini_model)
+
+        providers = {"claude": claude, "gemini": gemini}
+        primary = providers.get(settings.llm_primary, gemini)
+        fallback = providers.get(settings.llm_fallback, claude)
+        _llm_provider = FallbackLLMProvider(primary=primary, fallback=fallback)
+    return _llm_provider
 
 
 def get_orchestrator() -> Orchestrator:

@@ -49,30 +49,28 @@ class SynthesizerAgent(BaseAgent):
         if web_result:
             all_sources.extend(web_result.sources)
 
-        prompt = f"""You are a research synthesizer. Combine the findings from multiple research agents into a single,
-comprehensive, well-structured answer. Follow these rules:
+        system = (
+            "You are a research synthesizer. Combine the findings from multiple research agents into a single, "
+            "comprehensive, well-structured answer. Follow these rules:\n"
+            "1. Merge overlapping information, don't repeat\n"
+            "2. Highlight where document findings and web findings agree or conflict\n"
+            "3. Use numbered citations [1], [2], etc. that map to the sources list\n"
+            "4. Structure the answer with clear sections using markdown\n"
+            "5. End with a 'Sources' section listing all references"
+        )
 
-1. Merge overlapping information, don't repeat
-2. Highlight where document findings and web findings agree or conflict
-3. Use numbered citations [1], [2], etc. that map to the sources list
-4. Structure the answer with clear sections using markdown
-5. End with a "Sources" section listing all references
-
-QUESTION: {query}
-
-RESEARCH FINDINGS:
-{combined_findings}
-
-AVAILABLE SOURCES:
-{self._format_sources(all_sources)}
-
-Provide the final synthesized answer:"""
+        prompt = (
+            f"QUESTION: {query}\n\n"
+            f"RESEARCH FINDINGS:\n{combined_findings}\n\n"
+            f"AVAILABLE SOURCES:\n{self._format_sources(all_sources)}\n\n"
+            "Provide the final synthesized answer:"
+        )
 
         yield AgentEvent(self.name, AgentStatus.GENERATING, "Composing final answer with citations...")
 
         # Stream the response
         final_answer = ""
-        async for token in self.llm_provider.stream(prompt):
+        async for token in self.llm_provider.stream(prompt, system=system):
             final_answer += token
             yield AgentEvent(self.name, AgentStatus.GENERATING, token, data={"type": "token"})
 

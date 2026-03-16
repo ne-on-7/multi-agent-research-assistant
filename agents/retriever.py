@@ -42,18 +42,15 @@ class RetrieverAgent(BaseAgent):
             for r in results[:5]
         )
 
-        prompt = f"""Based on the following passages retrieved from uploaded documents, answer the user's question.
-Include specific references to which document/page the information came from.
-If the passages don't contain enough information, say so clearly.
+        system = (
+            "Based on the following passages retrieved from uploaded documents, answer the user's question. "
+            "Include specific references to which document/page the information came from. "
+            "If the passages don't contain enough information, say so clearly. "
+            "Provide a detailed, well-structured answer with citations."
+        )
+        prompt = f"QUESTION: {query}\n\nRETRIEVED PASSAGES:\n{passages}"
 
-QUESTION: {query}
-
-RETRIEVED PASSAGES:
-{passages}
-
-Provide a detailed, well-structured answer with citations."""
-
-        summary = await self.llm_provider.generate(prompt)
+        summary = await self.llm_provider.generate(prompt, system=system)
 
         yield AgentEvent(self.name, AgentStatus.GENERATING, "Compiling document findings...")
 

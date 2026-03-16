@@ -1,6 +1,7 @@
+import asyncio
+import json
 from dataclasses import dataclass
 from pathlib import Path
-import pickle
 
 import faiss
 import numpy as np
@@ -25,6 +26,7 @@ class VectorStore:
         self.index_path = Path(index_path)
         self.index = faiss.IndexFlatIP(dimension)
         self.documents: list[DocumentChunk] = []
+        self._write_lock = asyncio.Lock()
 
     def add_documents(self, chunks: list[DocumentChunk], embeddings: np.ndarray):
         faiss.normalize_L2(embeddings)
@@ -45,15 +47,19 @@ class VectorStore:
     def save(self):
         self.index_path.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self.index, str(self.index_path / "index.faiss"))
-        with open(self.index_path / "documents.pkl", "wb") as f:
-            pickle.dump(self.documents, f)
+        with open(self.index_path / "documents.json", "w") as f:
+            json.dump(
+                [{"text": d.text, "metadata": d.metadata} for d in self.documents],
+                f,
+            )
 
     def load(self):
         index_file = self.index_path / "index.faiss"
-        if index_file.exists():
+        docs_file = self.index_path / "documents.json"
+        if index_file.exists() and docs_file.exists():
             self.index = faiss.read_index(str(index_file))
-            with open(self.index_path / "documents.pkl", "rb") as f:
-                self.documents = pickle.load(f)
+            with open(docs_file, "r") as f:
+                self.documents = [DocumentChunk(**d) for d in json.load(f)]
 
     def clear(self):
         self.index = faiss.IndexFlatIP(self.dimension)

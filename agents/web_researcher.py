@@ -1,3 +1,4 @@
+import logging
 from typing import AsyncGenerator
 
 import httpx
@@ -6,6 +7,8 @@ from duckduckgo_search import DDGS
 
 from agents.base import BaseAgent, AgentEvent, AgentResult, AgentStatus
 from services.llm_provider import LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 class WebResearcherAgent(BaseAgent):
@@ -59,13 +62,13 @@ class WebResearcherAgent(BaseAgent):
         yield AgentEvent(self.name, AgentStatus.DONE, "Web research complete.", data={"result": result})
 
     async def _generate_search_queries(self, query: str) -> list[str]:
-        prompt = f"""Generate 3 focused search queries to research the following question.
-Return ONLY the queries, one per line, no numbering or bullets.
+        system = "Generate 3 focused search queries to research the user's question. Return ONLY the queries, one per line, no numbering or bullets."
 
-Question: {query}"""
-
-        response = await self.llm_provider.generate(prompt)
+        response = await self.llm_provider.generate(query, system=system)
         queries = [q.strip() for q in response.strip().split("\n") if q.strip()]
+        if not queries:
+            logger.warning("LLM returned no search queries, falling back to original query")
+            return [query]
         return queries[:3]
 
     async def _search_web(self, queries: list[str]) -> list[dict]:
@@ -83,7 +86,11 @@ Question: {query}"""
                                 "url": r["href"],
                                 "snippet": r.get("body", ""),
                             })
-            except Exception:
+            except (httpx.HTTPError, ConnectionError, TimeoutError) as e:
+                logger.warning("Search failed for query %r: %s", q, e)
+                continue
+            except Exception as e:
+                logger.error("Unexpected error during web search for query %r: %s", q, e)
                 continue
 
         # Try to fetch full content for top results
@@ -92,8 +99,10 @@ Question: {query}"""
                 content = await self._fetch_page_content(r["url"])
                 if content:
                     r["full_content"] = content[:2000]
-            except Exception:
-                pass
+            except (httpx.HTTPError, ConnectionError, TimeoutError) as e:
+                logger.warning("Failed to fetch content from %s: %s", r["url"], e)
+            except Exception as e:
+                logger.error("Unexpected error fetching %s: %s", r["url"], e)
 
         return results
 
@@ -102,8 +111,9 @@ Question: {query}"""
             resp = await client.get(url)
             if resp.status_code != 200:
                 return None
+            html = resp.text
 
-        soup = BeautifulSoup(resp.text, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "nav", "footer"]):
             tag.decompose()
         return soup.get_text(separator="\n", strip=True)
@@ -114,14 +124,11 @@ Question: {query}"""
             for r in results[:5]
         )
 
-        prompt = f"""Based on the following web search results, provide a comprehensive answer to the question.
-Include URLs as citations for claims.
+        system = (
+            "You are a web research summarizer. Based on the provided web search results, "
+            "provide a comprehensive answer to the user's question. Include URLs as citations for claims. "
+            "Provide a detailed answer with inline citations [URL]."
+        )
+        prompt = f"QUESTION: {query}\n\nWEB RESULTS:\n{context}"
 
-QUESTION: {query}
-
-WEB RESULTS:
-{context}
-
-Provide a detailed answer with inline citations [URL]."""
-
-        return await self.llm_provider.generate(prompt)
+        return await self.llm_provider.generate(prompt, system=system)

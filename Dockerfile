@@ -14,4 +14,4 @@ COPY . .
 # Pre-download the embedding model
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
-EXPOSE 8000 8501
+EXPOSE 8000
