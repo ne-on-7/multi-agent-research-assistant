@@ -3,6 +3,7 @@ from services.embeddings import EmbeddingsService
 from services.vector_store import VectorStore
 from services.document_processor import DocumentProcessor
 from services.llm_provider import ClaudeProvider, GeminiProvider, FallbackLLMProvider
+from services.search_provider import SearchProvider, build_search_provider
 from services.orchestrator import Orchestrator
 from agents.retriever import RetrieverAgent
 from agents.web_researcher import WebResearcherAgent
@@ -26,8 +27,12 @@ def get_vector_store() -> VectorStore:
     global _vector_store
     if _vector_store is None:
         embeddings = get_embeddings()
-        _vector_store = VectorStore(dimension=embeddings.dimension, index_path=settings.faiss_index_path)
-        _vector_store.load()
+        _vector_store = VectorStore(
+            dimension=embeddings.dimension,
+            qdrant_url=settings.qdrant_url,
+            qdrant_api_key=settings.qdrant_api_key,
+            qdrant_path=settings.qdrant_path,
+        )
     return _vector_store
 
 
@@ -54,6 +59,16 @@ def get_llm_provider() -> FallbackLLMProvider:
     return _llm_provider
 
 
+_search_provider: SearchProvider | None = None
+
+
+def get_search_provider() -> SearchProvider:
+    global _search_provider
+    if _search_provider is None:
+        _search_provider = build_search_provider(tavily_api_key=settings.tavily_api_key)
+    return _search_provider
+
+
 def get_orchestrator() -> Orchestrator:
     global _orchestrator
     if _orchestrator is None:
@@ -62,7 +77,7 @@ def get_orchestrator() -> Orchestrator:
         emb = get_embeddings()
 
         retriever = RetrieverAgent(llm_provider=llm, vector_store=vs, embeddings_service=emb)
-        web_researcher = WebResearcherAgent(llm_provider=llm)
+        web_researcher = WebResearcherAgent(llm_provider=llm, search_provider=get_search_provider())
         synthesizer = SynthesizerAgent(llm_provider=llm)
 
         _orchestrator = Orchestrator(retriever, web_researcher, synthesizer)

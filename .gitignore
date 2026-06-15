@@ -1,7 +1,6 @@
 __pycache__/
 *.pyc
 .env
-data/faiss_index/
 data/*.pkl
 *.egg-info/
 dist/
@@ -11,3 +10,7 @@ venv/
 .DS_Store
 node_modules/
 frontend/dist/
+data/qdrant/
+data/qdrant_eval/
+data/faiss_index/
+eval/results.json

@@ -3,23 +3,26 @@ from typing import AsyncGenerator
 
 import httpx
 from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
 
 from agents.base import BaseAgent, AgentEvent, AgentResult, AgentStatus
 from services.llm_provider import LLMProvider
+from services.search_provider import SearchProvider
 
 logger = logging.getLogger(__name__)
 
 
 class WebResearcherAgent(BaseAgent):
-    def __init__(self, llm_provider: LLMProvider):
+    def __init__(self, llm_provider: LLMProvider, search_provider: SearchProvider):
         super().__init__(name="Web Researcher", llm_provider=llm_provider)
+        self.search_provider = search_provider
 
     async def execute(self, query: str, context: dict | None = None) -> AsyncGenerator[AgentEvent, None]:
         yield AgentEvent(self.name, AgentStatus.THINKING, "Generating search queries...")
 
-        # Use LLM to generate targeted search queries
-        search_queries = await self._generate_search_queries(query)
+        # Use LLM to generate targeted search queries, grounded in the document the
+        # retriever found so vague references ("this paper") resolve to the real subject.
+        doc_context = self._extract_doc_context(context)
+        search_queries = await self._generate_search_queries(query, doc_context)
 
         yield AgentEvent(
             self.name, AgentStatus.SEARCHING, f"Searching the web with {len(search_queries)} queries..."
@@ -61,11 +64,39 @@ class WebResearcherAgent(BaseAgent):
 
         yield AgentEvent(self.name, AgentStatus.DONE, "Web research complete.", data={"result": result})
 
-    async def _generate_search_queries(self, query: str) -> list[str]:
-        system = "Generate 3 focused search queries to research the user's question. Return ONLY the queries, one per line, no numbering or bullets."
+    def _extract_doc_context(self, context: dict | None) -> str:
+        """Pull a grounding summary from the retriever's result, if it actually found documents."""
+        if not context:
+            return ""
+        retriever_result = context.get("retriever_result")
+        # Only ground when the retriever found real documents (non-empty sources); otherwise
+        # leave it empty so general web questions with no uploaded docs still work.
+        if retriever_result and getattr(retriever_result, "sources", None) and getattr(retriever_result, "content", ""):
+            return retriever_result.content[:1500]
+        return ""
 
-        response = await self.llm_provider.generate(query, system=system)
-        queries = [q.strip() for q in response.strip().split("\n") if q.strip()]
+    async def _generate_search_queries(self, query: str, doc_context: str = "") -> list[str]:
+        system = (
+            "You generate web search queries to help answer the user's question. "
+            "Output exactly 3 queries, one per line — no numbering, bullets, or quotes. "
+            "Each query must be specific and self-contained; never output a single generic word "
+            "(e.g. 'paper', 'document', 'study') or anything that would match unrelated topics. "
+            "If the question refers to 'this paper', 'the document', 'it', etc., use the DOCUMENT "
+            "CONTEXT to identify the real subject (its title or topic) and search for that subject."
+        )
+
+        if doc_context:
+            user = f"DOCUMENT CONTEXT (what the user's document is about):\n{doc_context}\n\nQUESTION: {query}"
+        else:
+            user = query
+
+        response = await self.llm_provider.generate(user, system=system)
+        queries = [
+            q.strip().lstrip("0123456789.-) ").strip()
+            for q in response.strip().split("\n")
+            if q.strip()
+        ]
+        queries = [q for q in queries if q]
         if not queries:
             logger.warning("LLM returned no search queries, falling back to original query")
             return [query]
@@ -76,25 +107,17 @@ class WebResearcherAgent(BaseAgent):
         seen_urls = set()
 
         for q in queries:
-            try:
-                with DDGS() as ddgs:
-                    for r in ddgs.text(q, max_results=3):
-                        if r["href"] not in seen_urls:
-                            seen_urls.add(r["href"])
-                            results.append({
-                                "title": r.get("title", ""),
-                                "url": r["href"],
-                                "snippet": r.get("body", ""),
-                            })
-            except (httpx.HTTPError, ConnectionError, TimeoutError) as e:
-                logger.warning("Search failed for query %r: %s", q, e)
-                continue
-            except Exception as e:
-                logger.error("Unexpected error during web search for query %r: %s", q, e)
-                continue
+            for r in await self.search_provider.search(q, max_results=3):
+                url = r.get("url")
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    results.append(r)
 
-        # Try to fetch full content for top results
+        # Enrich top results with full page content — but only when the provider
+        # didn't already return it (Tavily supplies clean content; DuckDuckGo doesn't).
         for r in results[:3]:
+            if r.get("full_content"):
+                continue
             try:
                 content = await self._fetch_page_content(r["url"])
                 if content:
@@ -120,7 +143,7 @@ class WebResearcherAgent(BaseAgent):
 
     async def _summarize_findings(self, query: str, results: list[dict]) -> str:
         context = "\n\n---\n\n".join(
-            f"[{r['title']}]({r['url']})\n{r.get('full_content', r['snippet'])[:1000]}"
+            f"[{r['title']}]({r['url']})\n{(r.get('full_content') or r['snippet'])[:1000]}"
             for r in results[:5]
         )
 

@@ -1,6 +1,7 @@
 export async function streamQuery(query, onEvent, onDone, onError) {
   try {
-    const response = await fetch('/api/query', {
+    const BASE = import.meta.env.VITE_API_URL || '/api';
+    const response = await fetch(`${BASE}/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),

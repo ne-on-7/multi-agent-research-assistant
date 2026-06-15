@@ -8,10 +8,17 @@ from fastapi.staticfiles import StaticFiles
 
 from api.routes import health, ingest, query
 from config.settings import settings
+from services.observability import shutdown as langfuse_shutdown
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Multi-Agent Research Assistant", version="1.0.0")
+
+
+@app.on_event("shutdown")
+def _flush_langfuse():
+    """Flush buffered traces so nothing is lost when the server stops."""
+    langfuse_shutdown()
 
 app.add_middleware(
     CORSMiddleware,

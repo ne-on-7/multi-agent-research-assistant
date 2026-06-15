@@ -1,0 +1,34 @@
+[
+  {
+    "question": "What paper introduced the Transformer architecture and who wrote it?",
+    "ground_truth": "The Transformer was introduced in the 2017 paper 'Attention Is All You Need' by Vaswani et al. at Google."
+  },
+  {
+    "question": "Why are Transformers more parallelizable to train than RNNs?",
+    "ground_truth": "Transformers remove recurrence and rely on attention, so all tokens are processed at once rather than sequentially, which makes training highly parallelizable and much faster on modern hardware."
+  },
+  {
+    "question": "What is the purpose of positional encoding in a Transformer?",
+    "ground_truth": "Because the Transformer has no recurrence, positional encodings (sinusoidal) are added to the input embeddings so the model knows the order of tokens in the sequence."
+  },
+  {
+    "question": "What does multi-head attention do?",
+    "ground_truth": "Multi-head attention runs several attention operations in parallel, each head learning to focus on different relationships between tokens, then concatenates the results."
+  },
+  {
+    "question": "What is Retrieval-Augmented Generation and what are its main steps?",
+    "ground_truth": "RAG combines a retrieval system with a generative model. It retrieves relevant document chunks from a vector store, augments the prompt with that context, and then generates an answer grounded in the retrieved context."
+  },
+  {
+    "question": "How does RAG help reduce hallucination?",
+    "ground_truth": "RAG grounds answers in retrieved evidence and cites sources, which makes the model far less likely to fabricate facts and lets users verify claims against the original documents."
+  },
+  {
+    "question": "What are the typical components of a RAG stack?",
+    "ground_truth": "A RAG stack typically includes an embedding model, a vector database for similarity search, and a generator LLM that synthesizes the final answer."
+  },
+  {
+    "question": "Why can RAG keep a model's knowledge current without retraining?",
+    "ground_truth": "Because the external knowledge base can be updated independently, RAG systems can incorporate new information by updating the document store rather than retraining the model's weights."
+  }
+]

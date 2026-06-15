@@ -36,8 +36,8 @@ User Query
 
 | Agent | What It Does |
 |-------|-------------|
-| 🔍 **Retriever** | Searches your uploaded documents using FAISS vector similarity, then uses an LLM to extract and summarize relevant passages |
-| 🌐 **Web Researcher** | Generates smart search queries from your question, searches the web via DuckDuckGo, scrapes top results, and summarizes findings |
+| 🔍 **Retriever** | Searches your uploaded documents using Qdrant vector similarity, then uses an LLM to extract and summarize relevant passages |
+| 🌐 **Web Researcher** | Generates smart search queries from your question, searches the web via Tavily (or DuckDuckGo), scrapes top results, and summarizes findings |
 | ✍️ **Synthesizer** | Combines findings from both agents, resolves conflicts, deduplicates info, and produces a final cited answer streamed in real time |
 
 ---
@@ -49,10 +49,11 @@ User Query
 | **Backend** | FastAPI + Uvicorn with SSE streaming |
 | **Frontend** | React 19 + Vite + Tailwind CSS |
 | **LLM** | Claude (primary) + Gemini (fallback) |
-| **Vector DB** | FAISS (local) |
+| **Vector DB** | Qdrant (embedded) |
 | **Embeddings** | sentence-transformers (all-MiniLM-L6-v2) |
-| **Web Search** | DuckDuckGo |
-| **Containerization** | Docker + Docker Compose |
+| **Web Search** | Tavily (primary) + DuckDuckGo (fallback) |
+| **Observability** | Langfuse tracing |
+| **Evaluation** | RAGAS |
 
 ---
 
@@ -84,12 +85,6 @@ chmod +x start.sh
 
 This installs dependencies, starts the FastAPI backend on `http://localhost:8000`, and the React frontend on `http://localhost:5173`.
 
-**Option B — Using Docker:**
-
-```bash
-docker-compose up --build
-```
-
 ---
 
 ## 📖 Usage
@@ -98,6 +93,46 @@ docker-compose up --build
 2. ❓ **Ask a question** — Type your research question in the main input
 3. 👀 **Watch agents work** — See real-time activity from all three agents in parallel
 4. ✅ **Get your answer** — Receive a synthesized answer with numbered citations
+
+---
+
+## 🔍 Search Providers
+
+Web search runs behind a pluggable `SearchProvider` interface
+([`services/search_provider.py`](services/search_provider.py)):
+
+- **Tavily** (primary) — set `TAVILY_API_KEY` to use Tavily's ranked, LLM-ready
+  results. Because Tavily returns clean page content, the Web Researcher skips its
+  own HTML scrape, making research faster and higher-signal.
+- **DuckDuckGo** (fallback) — used automatically when no Tavily key is set, so the
+  app works with zero search configuration.
+
+Swapping providers is just an environment variable — no code changes.
+
+---
+
+## 📊 Observability & Evaluation
+
+**Tracing (Langfuse).** Built on the Langfuse Python SDK v4. When
+`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are set, every `/api/query` is traced
+end-to-end: one trace per request, a span per agent (Retriever / Web Researcher /
+Synthesizer), and a generation per LLM call capturing **model name + token usage**
+(which powers Langfuse's automatic cost tracking). Tracing is fully optional — with
+no keys it is a no-op and the app runs unchanged. See
+[`services/observability.py`](services/observability.py).
+
+**Evaluation (RAGAS).** An offline harness scores answer quality on a fixed
+question set — *faithfulness, answer relevancy, context precision, context recall* —
+using Claude as the judge LLM and the app's own embeddings:
+
+```bash
+pip install -r requirements.txt -r requirements-eval.txt
+python eval/run_eval.py
+```
+
+It runs the real pipeline against an isolated vector store, prints a metrics
+table, writes `eval/results.json`, and logs scores to Langfuse when configured.
+Details in [`eval/README.md`](eval/README.md).
 
 ---
 
@@ -132,18 +167,23 @@ multi-agent-research-assistant/
 ├── services/                   # Core business logic
 │   ├── orchestrator.py         # Multi-agent coordination
 │   ├── llm_provider.py         # LLM abstraction (Claude/Gemini)
-│   ├── vector_store.py         # FAISS vector store
+│   ├── search_provider.py      # Pluggable web search (Tavily/DuckDuckGo)
+│   ├── observability.py        # Langfuse tracing (optional)
+│   ├── vector_store.py         # Qdrant vector store
 │   ├── embeddings.py           # Embedding service
 │   └── document_processor.py   # PDF/URL/GitHub processing
+├── eval/                       # RAGAS evaluation harness
+│   ├── run_eval.py             # Runs the pipeline + scores with RAGAS
+│   ├── dataset.json            # Curated question/ground-truth set
+│   └── fixtures/               # Source docs ingested for eval
 ├── config/                     # Configuration
 │   └── settings.py             # Pydantic settings
 ├── frontend/                   # React + Vite SPA
 │   ├── src/components/         # UI components
 │   ├── src/hooks/              # Custom React hooks
 │   └── vite.config.js          # Vite config
-├── docker-compose.yml
-├── Dockerfile
 ├── requirements.txt
+├── requirements-eval.txt       # Eval-only dependencies
 ├── start.sh                    # Dev startup script
 └── .env.example                # Environment variable template
 ```
@@ -161,4 +201,9 @@ multi-agent-research-assistant/
 | `CLAUDE_MODEL` | Claude model to use | `claude-sonnet-4-20250514` |
 | `GEMINI_MODEL` | Gemini model to use | `gemini-2.0-flash` |
 | `EMBEDDING_MODEL` | Sentence transformer model | `all-MiniLM-L6-v2` |
-| `FAISS_INDEX_PATH` | Path to FAISS index storage | `data/faiss_index` |
+| `QDRANT_URL` | Qdrant server URL (server mode only) | `http://localhost:6333` |
+| `QDRANT_API_KEY` | Qdrant API key (optional) | — |
+| `TAVILY_API_KEY` | Tavily search key — falls back to DuckDuckGo if unset | — |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key (enables tracing) | — |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key (enables tracing) | — |
+| `LANGFUSE_BASE_URL` | Langfuse host (US: `https://us.cloud.langfuse.com`) | `https://cloud.langfuse.com` |

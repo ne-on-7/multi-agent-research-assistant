@@ -1,10 +1,14 @@
 import asyncio
-import json
+import uuid
 from dataclasses import dataclass
-from pathlib import Path
 
-import faiss
 import numpy as np
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Distance,
+    PointStruct,
+    VectorParams,
+)
 
 
 @dataclass
@@ -20,51 +24,101 @@ class SearchResult:
     score: float
 
 
+COLLECTION_NAME = "documents"
+
+
 class VectorStore:
-    def __init__(self, dimension: int = 384, index_path: str = "data/faiss_index"):
+    def __init__(
+        self,
+        dimension: int = 384,
+        qdrant_url: str = "http://localhost:6333",
+        qdrant_api_key: str = "",
+        qdrant_path: str = "",
+    ):
         self.dimension = dimension
-        self.index_path = Path(index_path)
-        self.index = faiss.IndexFlatIP(dimension)
-        self.documents: list[DocumentChunk] = []
         self._write_lock = asyncio.Lock()
 
-    def add_documents(self, chunks: list[DocumentChunk], embeddings: np.ndarray):
-        faiss.normalize_L2(embeddings)
-        self.index.add(embeddings)
-        self.documents.extend(chunks)
+        if qdrant_path:
+            # Embedded local mode: persists to disk, no server / Docker required.
+            self.client = QdrantClient(path=qdrant_path)
+        else:
+            client_kwargs = {"url": qdrant_url, "timeout": 30}
+            if qdrant_api_key:
+                client_kwargs["api_key"] = qdrant_api_key
+            self.client = QdrantClient(**client_kwargs)
 
-    def search(self, query_embedding: np.ndarray, top_k: int = 10) -> list[SearchResult]:
-        query = query_embedding.reshape(1, -1).copy()
-        faiss.normalize_L2(query)
-        scores, indices = self.index.search(query, top_k)
-        results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if 0 <= idx < len(self.documents):
-                doc = self.documents[idx]
-                results.append(SearchResult(text=doc.text, metadata=doc.metadata, score=float(score)))
-        return results
-
-    def save(self):
-        self.index_path.mkdir(parents=True, exist_ok=True)
-        faiss.write_index(self.index, str(self.index_path / "index.faiss"))
-        with open(self.index_path / "documents.json", "w") as f:
-            json.dump(
-                [{"text": d.text, "metadata": d.metadata} for d in self.documents],
-                f,
+        # Ensure collection exists
+        collections = [c.name for c in self.client.get_collections().collections]
+        if COLLECTION_NAME not in collections:
+            self.client.create_collection(
+                collection_name=COLLECTION_NAME,
+                vectors_config=VectorParams(size=dimension, distance=Distance.COSINE),
             )
 
+    def add_documents(self, chunks: list[DocumentChunk], embeddings: np.ndarray):
+        points = [
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=emb.tolist(),
+                payload={"text": chunk.text, **chunk.metadata},
+            )
+            for chunk, emb in zip(chunks, embeddings)
+        ]
+        batch_size = 500
+        for i in range(0, len(points), batch_size):
+            self.client.upsert(collection_name=COLLECTION_NAME, points=points[i : i + batch_size])
+
+    def search(self, query_embedding: np.ndarray, top_k: int = 10) -> list[SearchResult]:
+        results = self.client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=query_embedding.flatten().tolist(),
+            limit=top_k,
+        )
+        return [
+            SearchResult(
+                text=hit.payload.get("text", ""),
+                metadata={k: v for k, v in hit.payload.items() if k != "text"},
+                score=hit.score,
+            )
+            for hit in results.points
+        ]
+
+    def save(self):
+        pass  # Qdrant persists automatically
+
     def load(self):
-        index_file = self.index_path / "index.faiss"
-        docs_file = self.index_path / "documents.json"
-        if index_file.exists() and docs_file.exists():
-            self.index = faiss.read_index(str(index_file))
-            with open(docs_file, "r") as f:
-                self.documents = [DocumentChunk(**d) for d in json.load(f)]
+        pass  # Qdrant persists automatically
+
+    def list_documents(self) -> list[dict]:
+        """Return ingested documents grouped by source, scanned from the Qdrant collection."""
+        sources: dict[str, dict] = {}
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=COLLECTION_NAME,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for p in points:
+                payload = p.payload or {}
+                src = payload.get("source", "unknown")
+                if src not in sources:
+                    sources[src] = {"name": src, "type": payload.get("type", "unknown"), "chunks": 0}
+                sources[src]["chunks"] += 1
+            if offset is None:
+                break
+        return list(sources.values())
 
     def clear(self):
-        self.index = faiss.IndexFlatIP(self.dimension)
-        self.documents = []
+        self.client.delete_collection(collection_name=COLLECTION_NAME)
+        self.client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(size=self.dimension, distance=Distance.COSINE),
+        )
 
     @property
     def count(self) -> int:
-        return len(self.documents)
+        info = self.client.get_collection(COLLECTION_NAME)
+        return info.points_count

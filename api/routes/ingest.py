@@ -112,14 +112,7 @@ async def ingest_github(request: GitHubRequest):
 @router.get("/documents", response_model=list[DocumentInfo])
 async def list_documents():
     store = get_vector_store()
-    # Group chunks by source
-    sources: dict[str, dict] = {}
-    for doc in store.documents:
-        src = doc.metadata.get("source", "unknown")
-        if src not in sources:
-            sources[src] = {"name": src, "type": doc.metadata.get("type", "unknown"), "chunks": 0}
-        sources[src]["chunks"] += 1
-    return [DocumentInfo(**info) for info in sources.values()]
+    return [DocumentInfo(**info) for info in store.list_documents()]
 
 
 @router.delete("/documents")

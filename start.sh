@@ -24,7 +24,8 @@ source .venv/bin/activate
 echo "Installing Python dependencies..."
 pip install -q -r requirements.txt
 
-mkdir -p data
+# Qdrant runs in embedded local mode (see config/settings.py: qdrant_path).
+# No server or Docker required; data persists under data/qdrant.
 
 export PYTHONPATH="$(pwd)"
 
