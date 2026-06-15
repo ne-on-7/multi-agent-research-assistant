@@ -2,36 +2,39 @@
 
 A multi-agent AI system where three specialized agents collaborate to answer research questions from your documents, the web, and GitHub repositories — delivering synthesized, cited answers in real time.
 
+![Demo](docs/demo.gif)
+
 ---
 
 ## 🧠 How It Works
 
-Three AI agents work together, orchestrated in two phases:
+Three AI agents work together, orchestrated in two phases — the Retriever runs
+first so its findings can **ground** the Web Researcher's search queries:
 
 ```
 User Query
     │
     ▼
 ┌──────────────┐
-│  Orchestrator │
+│ Orchestrator │
 └──────┬───────┘
        │
-  ┌────┴────┐          ⚡ Phase 1: Parallel
-  ▼         ▼
-┌─────────┐  ┌──────────────┐
-│Retriever│  │Web Researcher│
-│ Agent   │  │    Agent     │
-└────┬────┘  └──────┬───────┘
-     │              │
-     └──────┬───────┘
-            ▼              🔗 Phase 2: Sequential
-     ┌─────────────┐
-     │ Synthesizer │
-     │    Agent    │
-     └─────────────┘
-            │
-            ▼
-     Final Answer with Citations
+       ▼  Phase 1a
+┌──────────────┐
+│  Retriever   │  searches your documents (Qdrant)
+└──────┬───────┘
+       │ findings ground the web search
+       ▼  Phase 1b
+┌──────────────┐
+│Web Researcher│  searches the web (Tavily / DuckDuckGo)
+└──────┬───────┘
+       │
+       ▼  Phase 2
+┌──────────────┐
+│ Synthesizer  │  merges, dedupes, cites — streamed live
+└──────┬───────┘
+       ▼
+Final Answer with Citations
 ```
 
 | Agent | What It Does |
@@ -58,6 +61,8 @@ User Query
 ---
 
 ## 🚀 Quick Start
+
+**Prerequisites:** Python 3.11+ and Node.js 18+.
 
 ### 1. Clone and configure
 
@@ -91,7 +96,7 @@ This installs dependencies, starts the FastAPI backend on `http://localhost:8000
 
 1. 📄 **Upload documents** — Use the sidebar to upload PDFs, paste web URLs, or link GitHub repos
 2. ❓ **Ask a question** — Type your research question in the main input
-3. 👀 **Watch agents work** — See real-time activity from all three agents in parallel
+3. 👀 **Watch agents work** — See each agent's status and output stream in real time
 4. ✅ **Get your answer** — Receive a synthesized answer with numbered citations
 
 ---
@@ -198,7 +203,7 @@ multi-agent-research-assistant/
 | `GOOGLE_API_KEY` | Your Google AI API key | — |
 | `LLM_PRIMARY` | Primary LLM provider | `claude` |
 | `LLM_FALLBACK` | Fallback LLM provider | `gemini` |
-| `CLAUDE_MODEL` | Claude model to use | `claude-sonnet-4-20250514` |
+| `CLAUDE_MODEL` | Claude model to use | `claude-sonnet-4-6` |
 | `GEMINI_MODEL` | Gemini model to use | `gemini-2.0-flash` |
 | `EMBEDDING_MODEL` | Sentence transformer model | `all-MiniLM-L6-v2` |
 | `QDRANT_URL` | Qdrant server URL (server mode only) | `http://localhost:6333` |
