@@ -1,0 +1,29 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Node / frontend build artifacts (rebuilt inside the image)
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# Local data & secrets (provided via env vars / Qdrant Cloud at runtime)
+data/qdrant/
+data/qdrant_eval/
+data/faiss_index/
+.env
+
+# Eval (offline-only, intentionally excluded from the image)
+eval/results.json
+
+# Misc
+.git/
+.gitignore
+.DS_Store
+docs/
+*.md
+build/
+dist/
